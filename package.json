@@ -1,0 +1,17 @@
+{
+  "name": "mongo-node",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "file-system": "^2.2.2",
+    "mongodb": "^3.4.0",
+    "rsvp": "^4.8.5"
+  }
+}
