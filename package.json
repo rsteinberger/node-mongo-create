@@ -12,6 +12,7 @@
   "dependencies": {
     "file-system": "^2.2.2",
     "mongodb": "^3.4.0",
-    "rsvp": "^4.8.5"
+    "rsvp": "^4.8.5",
+    "uuid": "^3.3.3"
   }
 }

@@ -8,22 +8,22 @@ var Db = require('mongodb').Db,
     Grid = require('mongodb').Grid,
     Code = require('mongodb').Code;
 var fs = require('fs');    
+var uuidv4 = require('uuid/v4');
 var Promise = require('rsvp').Promise;
 var createdCtr = 0;
 var MongoClient = require('mongodb').MongoClient;
 var url = "mongodb://localhost:27017";
 var collectionNames = ["association", "audio", "authority", "customer", "event", "pivot", "rule", "setting", "tag", "user"];
 
-// mongoCreateCollections();
-// pivotRegion();
-pivotCountry();
-
+//***********************************
 
 function deleteFile(outFile) {
-  fs.unlink(outFile, (err) => {
-  if (err) throw err;
-  console.log('successfully deleted ' + outFile);
-});
+  if (fs.existsSync(outFile)) {
+    fs.unlink(outFile, (err) => {
+      if (err) throw err;
+      console.log('successfully deleted ' + outFile);
+    });
+  }
 }
 
 function writeFile(outFile, data) {
@@ -42,67 +42,21 @@ function appendFile(outFile, data) {
   });
 }
 
-//***********************************
-
-function pivotCountry() {
-
-  var outFile = '/Users/ricksteinberger/Home/git/mongo-data/pivot-country.json';
-  var countryList = JSON.parse(fs.readFileSync('/Users/ricksteinberger/Home/git/mongo-data/countries.json', 'utf8'));
-  var countryRegions = JSON.parse(fs.readFileSync('/Users/ricksteinberger/Home/git/mongo-data/country-region.json', 'utf8'));
-  var count = countryRegions.length;
-  countryRegions.sort((a,b) => (a.country > b.country) ? 1 : ((b.country > a.country) ? -1 : 0)); 
-
-  deleteFile(outFile);
-  setTimeout(function(){ console.log('continue'); }, 2000);
-  appendFile(outFile, "[");
-
-  countryRegions.forEach(element => { 
-
-    var country = {};
-    var holdCountry = "";
-
-    if(element.country !== holdCountry){
-
-      queryPivot("name", element.region).then(function(pivot) {
-        // console.log(element.region);
-        // console.log(JSON.stringify(pivot));
-        country = {"_class": "country"};
-        country.regionId = pivot._id;
-        country.name = element.country;
-
-        countryListItem = getCountryFromList(element.country, countryList);
-        country.countrycode = countryListItem.country_code;
-        if (countryListItem.latlng) country.latitude = JSON.stringify( countryListItem.latlng[0] );
-        if (countryListItem.latlng) country.longitude = JSON.stringify( countryListItem.latlng[1] );
-        country.timezones = countryListItem.timezones;      
-
-        count--;
-        if(count == 0) {
-          appendFile(outFile, JSON.stringify(country) + "]" );
-          setTimeout(function(){ 
-              var obj = JSON.parse(fs.readFileSync(file, 'utf8'));
-              mongoInsert(obj);
-          }, 2000);
-        }else{
-          appendFile(outFile, JSON.stringify(country) + "," );          
-        }
-
-      }, function(err) {
-        console.error('Error Getting Pivot: ', err);
-      });
-
-      hold = element.country;
-
-    } // if 
-
-  }); 
-
+function mongoInsert(obj) {
+  console.log('mongoInsert');
+  MongoClient.connect(url, {native_parser:true, useUnifiedTopology: true}, function(err, db) {
+    if (err) throw err;
+    var dbo = db.db("local");
+    dbo.collection("pivot").insertMany(obj, function(err, res) {
+      if (err) throw err;
+      console.log("Number of documents inserted: " + res.insertedCount);
+      db.close();
+    });
+  });
 }
 
 function queryPivot(fieldName, objectName) {
-
     return new Promise((resolve, reject) => {
-
      MongoClient.connect(url, {native_parser:true, useUnifiedTopology: true}, function(err, client) {
        const db = client.db('local');
       
@@ -134,99 +88,181 @@ function queryPivot(fieldName, objectName) {
        });
     }); //end mongo client
 
+   }); // Promise
+
+}
+
+function queryPivots(fieldName1, objectName1, fieldName2, objectName2) {
+    return new Promise((resolve, reject) => {
+     MongoClient.connect(url, {native_parser:true, useUnifiedTopology: true}, function(err, client) {
+       const db = client.db('local');
+      
+       //Step 1: declare promise      
+       var myPromise = () => {
+         return new Promise((resolve, reject) => {
+            db
+             .collection('pivot')
+             .find({[fieldName]: objectName, [fieldName2]: objectName2})
+             .toArray(function(err, data) {
+                 err 
+                    ? reject(err) 
+                    : resolve(data[0]);
+               });
+         });
+       };
+
+       //Step 2: async promise handler
+       var callMyPromise = async () => {          
+          var result = await (myPromise());
+          //anything here is executed after result is resolved
+          return result;
+       };
+ 
+       //Step 3: make the call
+       callMyPromise().then(function(result) {
+          client.close();
+          resolve(result);
+       });
+    }); //end mongo client
 
    }); // Promise
 
-
 }
 
-function getCountryFromList(name, countryList) {
-  var result = {};
-  countryList.forEach(element => { 
-    if(element.name === name) {
-      result = element;
-
+function dedupe(ary, field){
+  ary.sort((a,b) => ( String(a[field]).toLowerCase() > String(b[field]).toLowerCase() ) ? 1 : ( ( String(b[field]).toLowerCase() > String(a[field]).toLowerCase() ) ? -1 : 0));
+  var result = [];
+  var hold = ary[0];
+  for (var i = 0; i < ary.length; i++) {
+    if( String(ary[i][field]).toLowerCase() != String(hold[field]).toLowerCase() ) {
+      result.push(hold);
+      hold = ary[i];
     }
-  });
+  }  
+  result.push(hold);
   return result;
 }
 
-// function insertCountries(file) {
-//   var obj = JSON.parse(fs.readFileSync(file, 'utf8'));
-//   mongoInsert(obj);
-// }
 
 //***********************************
 
-function pivotRegion() {
-  var outFile = '/Users/ricksteinberger/Home/git/mongo-data/pivot-region.json';
-  var obj = JSON.parse(fs.readFileSync('/Users/ricksteinberger/Home/git/mongo-data/country-region.json', 'utf8'));
-  obj.sort((a,b) => (a.region > b.region) ? 1 : ((b.region > a.region) ? -1 : 0)); 
-  var regions = [];
 
-  var region1 = {"_class": "region", "name": "", "longitude": -77.3619, "latitude": 38.9440};;
-  var hold = obj[0].region;
-  region1.name = hold;
+// locationRegions();
+// locationCountries();
+// locationStates();
 
-  regions.push(region1);
-
-  obj.forEach(element => { 
-    var region = {"_class": "region", "name": "", "longitude": -77.3619, "latitude": 38.9440};;
-    if(element.region === hold){
-      // na
-    } else {
-      hold = element.region;
-      console.log(JSON.stringify(hold));
-      region.name = hold
-      regions.push(region);
+// mongoCreateCollections();
+// locationRegionInserts();
+// locationCountryInserts();
+locationStateInserts();
 
 
-    } 
-  }); 
+//***********************************
 
-  // console.log(regions); 
-  writeFile(outFile, regions);
 
-  // fs.writeFile('/Users/ricksteinberger/Home/git/mongo-data/pivot-region.json', JSON.stringify(regions), 'utf8', function(err) {
-  //   if(err) {
-  //     console.log('error ' + err);
-  //   }
-  //   console.log('Done');
-  // });
 
-  mongoInsert(regions);
+function locationRegionInserts() {
+  var obj = JSON.parse(fs.readFileSync('/Users/ricksteinberger/Home/git/mongo-data/location-regions.json', 'utf8'));
+  mongoInsert(obj);
+}
 
+function locationCountryInserts() {
+  var obj = JSON.parse(fs.readFileSync('/Users/ricksteinberger/Home/git/mongo-data/location-countries.json', 'utf8'));
+  mongoInsert(obj);
+}
+
+function locationStateInserts() {
+  var obj = JSON.parse(fs.readFileSync('/Users/ricksteinberger/Home/git/mongo-data/location-states.json', 'utf8'));
+  mongoInsert(obj);
 }
 
 
-
-
-
 //***********************************
 
-function mongoInsert(obj) {
-  console.log('mongoInsert');
 
-  MongoClient.connect(url, {native_parser:true, useUnifiedTopology: true}, function(err, db) {
-    if (err) throw err;
+function locationRegions() {
+  var locations = JSON.parse(fs.readFileSync('/Users/ricksteinberger/Home/git/mongo-data/locations.json', 'utf8'));
+  var outFile = '/Users/ricksteinberger/Home/git/mongo-data/location-regions.json';
+  deleteFile(outFile);
+  locations = dedupe(locations, "region");
 
-    var dbo = db.db("local");
-    dbo.collection("pivot").insertMany(obj, function(err, res) {
-      if (err) throw err;
-      console.log("Number of documents inserted: " + res.insertedCount);
-      db.close();
-    });
+  var results = [];
+  locations.forEach((element, index) => { 
+    var obj = {"_id": uuidv4(), "_class": "region", "name": element.region };
+    results.push(obj);
+  });
+  writeFile(outFile, results);
+}
 
+
+function locationCountries() {
+  var locations = JSON.parse(fs.readFileSync('/Users/ricksteinberger/Home/git/mongo-data/locations.json', 'utf8'));
+  var locationRegions = JSON.parse(fs.readFileSync('/Users/ricksteinberger/Home/git/mongo-data/location-regions.json', 'utf8'));
+  var outFile = '/Users/ricksteinberger/Home/git/mongo-data/location-countries.json';
+  deleteFile(outFile);
+  locations = dedupe(locations, "country");
+
+  var result = [];
+  locations.forEach((element, index) => { 
+    var obj = {"_id": uuidv4(), "_class": "country", "name": element.country };
+
+      locationRegions.forEach((element1, index) => { 
+        if( element.region == element1.name ) {
+          obj.region_id = element1._id;
+          obj.region_name = element1.name;
+        }
+      });
+
+
+    if(obj.name != "") {
+      result.push(obj);      
+    }
 
   });
-
-
+  writeFile(outFile, result);
 }
 
 
+function locationStates() {
+  var locations = JSON.parse(fs.readFileSync('/Users/ricksteinberger/Home/git/mongo-data/locations.json', 'utf8'));
+  var locationCountries = JSON.parse(fs.readFileSync('/Users/ricksteinberger/Home/git/mongo-data/location-countries.json', 'utf8'));
+  var outFile = '/Users/ricksteinberger/Home/git/mongo-data/location-states.json';
+  deleteFile(outFile);
+  locations = dedupe(locations, "state");
+  var result = [];
+  locations.forEach((element, index) => { 
+
+    var temp = element.state;
+    if(temp) {
+      temp = temp.replace("'", "");
+      temp = temp.replace("`", "");
+      temp = temp.replace(" ", "");      
+    }
+
+    var obj = {"_id": uuidv4(), "_class": "province", "name": temp };
+
+      locationCountries.forEach((element1, index) => { 
+        if( element.country == element1.name ) {
+
+          obj.region_id = element1.region_id;
+          obj.region_name = element1.region_name;
+
+          obj.country_id = element1._id;
+          obj.country_name = element1.name;
+
+
+        }
+      });
 
 
 
+    if(obj.name != "") {
+      result.push(obj);      
+    }
+
+  });
+  writeFile(outFile, result);
+}
 
 //***********************************
 
@@ -276,5 +312,7 @@ function createCollection(db, dbo, collectionName) {
 
   });
 }
+
+//***********************************
 
 
